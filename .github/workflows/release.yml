@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  # Builds every target, without publishing anything, when this workflow changes.
+  pull_request:
+    paths: [.github/workflows/release.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Take the version from the release tag
+        if: github.event_name == 'release'
+        run: |
+          sed -i.bak "s/^version = \".*\"$/version = \"${GITHUB_REF_NAME#v}\"/" server/Cargo.toml
+          cargo update --workspace
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked -p android-resources-lsp --target ${{ matrix.target }}
+      - run: |
+          binary=target/${{ matrix.target }}/release/android-resources-lsp${{ runner.os == 'Windows' && '.exe' || '' }}
+          gzip -c "$binary" > android-resources-lsp-${{ matrix.target }}.gz
+      - if: github.event_name == 'release'
+        run: gh release upload "$GITHUB_REF_NAME" android-resources-lsp-${{ matrix.target }}.gz --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  licenses:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-about
+      # `shell: bash` sets pipefail, so that `tr` does not hide a failure of cargo-about. Some crates
+      # ship their license with Windows line endings.
+      - shell: bash
+        run: |
+          cargo about generate --fail --locked -m server/Cargo.toml server/about.hbs | tr -d '\r' > THIRD-PARTY-LICENSES.md
+          cp "$(rustc --print sysroot)/share/doc/rust/COPYRIGHT-library.html" .
+      - if: github.event_name == 'release'
+        run: gh release upload "$GITHUB_REF_NAME" THIRD-PARTY-LICENSES.md COPYRIGHT-library.html --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
