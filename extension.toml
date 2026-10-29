@@ -1,0 +1,11 @@
+id = "android-resources-lsp"
+name = "Android Resources"
+version = "0.1.0"
+schema_version = 1
+authors = ["Husur"]
+description = "Shows the text of Android string resources (R.string, R.plurals) in Kotlin sources, and goes to their definition."
+repository = "https://github.com/husur/android-resources-lsp"
+
+[language_servers.android-resources-lsp]
+name = "Android Resources LSP"
+languages = ["Kotlin"]
